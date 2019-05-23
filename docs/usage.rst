@@ -92,10 +92,25 @@ This time around, the ``myserver2`` certificate will include
 ``myserver2``, ``myserver2.local``, and ``service.example.com`` as DNS
 subject alternative names.
 
+Issue a server certificate by passing-in certificate signing request
+(CSR) from which the public key should be extracted::
+
+  openssl req -new -newkey rsa:2048 -nodes -keyout "/tmp/myserver3.key.pem" -subj "/CN=ignoredname" -out "/tmp/myserver3.csr.pem"
+  gimmecert server --csr /tmp/myserver3.csr.pem myserver3
+
+This will create the following artifacts for the server:
+
+- ``.gimmecert/server/myserver3.csr.pem`` (CSR)
+- ``.gimmecert/server/myserver3.cert.pem`` (certificate)
+
 Renew existing certificates, keeping the same private key and naming::
 
   gimmecert renew server myserver1
   gimmecert renew server myclient1
+
+Show information about CA hierarchy and issued certificates::
+
+  gimmecert status
 
 
 Initialisation
@@ -199,21 +214,32 @@ Key usage and extended key usage in certificate are set typical TLS
 server use (e.g. *digital signature* + *key encipherment* for KU, and
 *TLS WWW server authentication* for EKU).
 
-Rerunning the command will not overwrite existing data. However, if
-you made a mistake with additional DNS subject alternative names, you
-can easily fix this with the ``--update-dns-names`` option::
+Rerunning the command will not overwrite existing data.
 
-  # Replace existing additional names.
-  gimmecert server --update-dns-names myserver correctname.example.com
+.. note::
+   For changing the list of additional subject alternative names
+   included in already issued server certificates, see the
+   ``--update-dns-names`` option in the ``gimmecert renew`` command.
 
-  # Remove additional names altogether.
-  gimmecert server --update-dns-names myserver
+In addition to generating a private key, it is also possible to
+pass-in a certificate signing request (CSR). If specified path is a
+dash (``-``), CSR is read from standard input. The resulting
+certificate will contain public key from the CSR. All other
+information stored in the CSR (naming, extensions) is ignored. For
+example::
 
-The ``--update-dns-command`` will keep the private key intact - only
-the certificate will be renewed. If you haven't issued any certificate
-for this server entity before, though, the option is ignored, and the
-command behaves as if it was not specified (so you still get a private
-key and certificate).
+  # Issue server certificate by passing-in path to a generated CSR.
+  gimmecert server --csr /tmp/myown.csr.pem myserver
+
+  # Issue server certificate by reading the CSR from standard input.
+  gimmecert server --csr - myserver
+
+  # Issue server certificate by reading the CSR from standard input,
+  # using redirection.
+  gimmecert server --csr - myserver < /tmp/myown.csr.pem
+
+The passed-in CSR will be stored alongside certificate, under
+``.gimmecert/server/NAME.csr.pem``.
 
 
 Issuing client certificates
@@ -245,6 +271,26 @@ Key usage and extended key usage in certificate are set typical TLS
 client use (e.g. *digital signature* + *key encipherment* for KU, and
 *TLS WWW client authentication* for EKU).
 
+In addition to generating a private key, it is also possible to
+pass-in a certificate signing request (CSR). If specified path is a
+dash (``-``), CSR is read from standard input. The resulting
+certificate will contain public key from the CSR. All other
+information stored in the CSR (naming, extensions) is ignored. For
+example::
+
+  # Issue client certificate by passing-in path to a generated CSR.
+  gimmecert client --csr /tmp/myown.csr.pem myclient
+
+  # Issue client certificate by reading the CSR from standard input.
+  gimmecert client --csr - myclient
+
+  # Issue client certificate by reading the CSR from standard input,
+  # using redirection.
+  gimmecert client --csr - myclient < /tmp/myown.csr.pem
+
+The passed-in CSR will be stored alongside certificate, under
+``.gimmecert/client/NAME.csr.pem``.
+
 
 Renewing certificates
 ---------------------
@@ -264,13 +310,55 @@ The command will:
 - Overwrite the existing certificate with a new one.
 - Show information where the artifacts can be grabbed from.
 
-.. note::
-   For changing the list of additional subject alternative names
-   included in server certificates, see the ``--update-dns-names`` for
-   the ``gimmecert server`` command.
-
 To also generate a new private key during renewal, use the
 ``--new-private-key`` or ``-p`` option. For example::
 
   gimmecert renew --new-private-key server myserver
   gimmecert renew -p server my server
+
+To replace the existing private key or CSR during renewal with a new
+CSR, use the ``--csr`` option and pass along path to the file. If
+specified path is a dash (``-``), CSR is read from standard input. For
+example::
+
+  gimmecert renew --csr /tmp/myserver.csr.pem server myserver
+  gimmecert renew --csr - server myserver < /tmp/myserver.csr.pem
+  gimmecert renew --csr - client myclient
+
+If you initially made a mistake when providing additional DNS subject
+alternative names for a server certificate, you can easily fix this
+with the ``--update-dns-names`` or ``-u`` option::
+
+  # Replace existing additional names with just one name.
+  gimmecert renew server --update-dns-names "correctname.example.com" myserver
+
+  # Replace existing additional names with mutliple names.
+  gimmecert renew server --update-dns-names "correctname1.example.com,correctname2.example.com" myserver 
+
+  # Remove additional names altogether.
+  gimmecert renew server --update-dns-names "" myserver
+
+
+Getting information about CA hierarchy and issued certificates
+--------------------------------------------------------------
+
+In order to show information about the CA hierarchy and issued
+certificates simply run the status command::
+
+  gimmecert status
+
+The command will:
+
+- Show information about every CA in generated hierarchy (subject DN,
+  validity, certificate paths, whether the CA is used for issuing end
+  entity certificates).
+- Show information about all issued server certificates (subject DN,
+  DNS subject alternative names, validity, private key or CSR path,
+  certificate path).
+- Show information about all issued client certificates (subject DN,
+  validity, private key or CSR path, certificate path).
+
+Validity of all certificates is shown in UTC.
+
+Command can also be used for checking if Gimmecert has been
+initialised in local directory or not.

@@ -24,7 +24,7 @@ import os
 import sys
 
 from .decorators import subcommand_parser, get_subcommand_parser_setup_functions
-from .commands import client, help_, init, renew, server, usage, ExitCode
+from .commands import client, help_, init, renew, server, status, usage, ExitCode
 
 
 ERROR_GENERIC = 10
@@ -48,22 +48,31 @@ Examples:
     # Issue a TLS server certificate with additional DNS subject alternative names.
     gimmecert server myserver extradns1.local extradns2.example.com
 
+    # Issue a TLS server certificate by using public key from the CSR (naming/extensions are ignored).
+    gimmecert server myserver --csr /tmp/myserver.csr.pem
+
     # Issue a TLS client certificate.
     gimmecert client myclient
 
-    # Renew a TLS server certificate with updated DNS subject alternative names. Keeps the private key if any.
-    gimmecert server myserver wrongdns.local
-    gimmecert server --update-dns-names myserver correctdns1.local correctdns2.local
-
-    # Renew a TLS server certificate removing extra DNS subject alternative names. Keeps the private key if any.
-    gimmecert server myserver dontneedthisname.local
-    gimmecert server myserver --update-dns-names
+    # Issue a TLS client certificate by using public key from the CSR (naming/extensions are ignored).
+    gimmecert client myclient --csr /tmp/myclient.csr.pem
 
     # Renew a TLS server certificate, preserving naming and private key.
     gimmecert renew server myserver
 
+    # Renew a TLS server certificate, replacing the extra DNS names, but keeping the private key.
+    gimmecert server myserver wrongdns.local
+    gimmecert renew server myserver --update-dns-names "correctdns1.local,correctdns2.local"
+
+    # Renew a TLS server certificate, removing extra DNS subject alternative names, but keeping the private key.
+    gimmecert server myserver dontneedthisname.local
+    gimmecert renew server myserver --update-dns-names ""
+
     # Renew a TLS client certificate, preserving naming and private key.
     gimmecert renew client myclient
+
+    # Show information about CA hierarchy and issued certificates.
+    gimmecert status
 """
 
 
@@ -102,14 +111,13 @@ def setup_server_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('server', description='Issues server certificate.')
     subparser.add_argument('entity_name', help='Name of the server entity.')
     subparser.add_argument('dns_name', nargs='*', help='Additional DNS names to include in subject alternative name.')
-    subparser.add_argument('--update-dns-names', '-u', action='store_true', help='''Renew certificate for an existing server entity by reusing \
-    the private key, but replacing the DNS subject alternative names with listed values (if any). \
-    If entity does not exist, this option has no effect, and a new private key/certificate will be generated as usual.''')
+    subparser.add_argument('--csr', '-c', type=str, default=None, help='''Do not generate server private key locally, and use the passed-in \
+    certificate signing request (CSR) instead. Use dash (-) to read from standard input. Only the public key is taken from the CSR.''')
 
     def server_wrapper(args):
         project_directory = os.getcwd()
 
-        return server(sys.stdout, sys.stderr, project_directory, args.entity_name, args.dns_name, args.update_dns_names)
+        return server(sys.stdout, sys.stderr, project_directory, args.entity_name, args.dns_name, args.csr)
 
     subparser.set_defaults(func=server_wrapper)
 
@@ -120,11 +128,13 @@ def setup_server_subcommand_parser(parser, subparsers):
 def setup_client_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('client', description='Issue client certificate.')
     subparser.add_argument('entity_name', help='Name of the client entity.')
+    subparser.add_argument('--csr', '-c', type=str, default=None, help='''Do not generate client private key locally, and use the passed-in \
+    certificate signing request (CSR) instead. Use dash (-) to read from standard input. Only the public key is taken from the CSR.''')
 
     def client_wrapper(args):
         project_directory = os.getcwd()
 
-        return client(sys.stdout, sys.stderr, project_directory, args.entity_name)
+        return client(sys.stdout, sys.stderr, project_directory, args.entity_name, args.csr)
 
     subparser.set_defaults(func=client_wrapper)
 
@@ -136,14 +146,54 @@ def setup_renew_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('renew', description='Renews existing certificates.')
     subparser.add_argument('entity_type', help='Type of entity to renew.', choices=['server', 'client'])
     subparser.add_argument('entity_name', help='Name of the entity')
-    subparser.add_argument('--new-private-key', '-p', action='store_true', help="Generate new private key for renewal. Default is to keep the existing key.")
+
+    def csv_list(csv):
+        """
+        Small helper that converts CSV string into a list.
+        """
+
+        if csv:
+            return csv.split(",")
+
+        return []
+
+    subparser.add_argument('--update-dns-names', '-u', dest="dns_names", default=None, type=csv_list,
+                           help='''Replace the DNS subject alternative names with new values. \
+    Valid only for server certificate renewals. Multiple DNS names can be passed-in as comma-separated list. \
+    Passing-in an empty string will result in all additional DNS subject alternative names being removed. \
+    The entity name is kept as DNS subject alternative name in either case.''')
+
+    new_private_key_or_csr_group = subparser.add_mutually_exclusive_group()
+
+    new_private_key_or_csr_group.add_argument('--new-private-key', '-p', action='store_true', help='''Generate new private key for renewal. \
+    Default is to keep the existing key. Mutually exclusive with the --csr option.''')
+    new_private_key_or_csr_group.add_argument('--csr', '-c', type=str, default=None, help='''Do not use local private key and public key information from \
+    existing certificate, and use the passed-in certificate signing request (CSR) instead. Use dash (-) to read from standard input. \
+    If private key exists, it will be removed. Mutually exclusive with the --new-private-key option. Only the public key is taken from the CSR.''')
 
     def renew_wrapper(args):
         project_directory = os.getcwd()
 
-        return renew(sys.stdout, sys.stderr, project_directory, args.entity_type, args.entity_name, args.new_private_key)
+        return renew(sys.stdout, sys.stderr, project_directory, args.entity_type, args.entity_name, args.new_private_key, args.csr, args.dns_names)
 
     subparser.set_defaults(func=renew_wrapper)
+
+    return subparser
+
+
+@subcommand_parser
+def setup_status_subcommand_parser(parser, subparsers):
+
+    subparser = subparsers.add_parser(name="status", description="Shows status information about issued certificates.")
+
+    def status_wrapper(args):
+        project_directory = os.getcwd()
+
+        status(sys.stdout, sys.stderr, project_directory)
+
+        return ExitCode.SUCCESS
+
+    subparser.set_defaults(func=status_wrapper)
 
     return subparser
 

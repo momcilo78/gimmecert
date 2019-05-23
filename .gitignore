@@ -5,17 +5,23 @@
 # Ignore build artefacts.
 docs/_build/
 dist/
+build/
 
 # Ignore Python artefacts.
 .eggs/
 .pytest_cache/
 __pycache__/
 *.egg-info/
+*.pyc
 
 # Ignore test artefacts.
 .coverage
+.coverage.*
 coverage/
 .tox/
 
 # Ignore project temporary directory.
 tmp/
+
+# Ignore Vagrant artifacts.
+.vagrant
