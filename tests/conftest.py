@@ -65,7 +65,7 @@ def key_with_csr(tmpdir):
     csr_file = custom_csr_dir.join("%s.csr.pem" % name)
 
     # Generate private key and CSR, and output them.
-    private_key = gimmecert.crypto.generate_private_key()
+    private_key = gimmecert.crypto.KeyGenerator('rsa', 2048)()
     csr = gimmecert.crypto.generate_csr(name, private_key)
 
     gimmecert.storage.write_private_key(private_key, private_key_file.strpath)
@@ -86,7 +86,8 @@ def sample_project_directory(tmpdir):
     CSR).
 
     Initialised CA hierarchy is 1 level deep, with basename used being
-    identical to temporary directory base name.
+    identical to temporary directory base name, and it uses 2048-bit
+    RSA keys.
 
     The following server certificates are issued:
 
@@ -129,35 +130,62 @@ def sample_project_directory(tmpdir):
     for i in range(1, per_type_count + 1):
         # Used in generated samples.
         name = "server-with-csr-%d" % i
-        private_key = gimmecert.crypto.generate_private_key()
+        private_key = gimmecert.crypto.KeyGenerator('rsa', 2048)()
         csr = gimmecert.crypto.generate_csr(name, private_key)
         gimmecert.storage.write_private_key(private_key, custom_csr_dir.join("%s.key.pem" % name).strpath)
         gimmecert.storage.write_csr(csr, custom_csr_dir.join("%s.csr.pem" % name).strpath)
 
         # Used in generated samples.
         name = "client-with-csr-%d" % i
-        private_key = gimmecert.crypto.generate_private_key()
+        private_key = gimmecert.crypto.KeyGenerator('rsa', 2048)()
         csr = gimmecert.crypto.generate_csr(name, private_key)
         gimmecert.storage.write_private_key(private_key, custom_csr_dir.join("%s.key.pem" % name).strpath)
         gimmecert.storage.write_csr(csr, custom_csr_dir.join("%s.csr.pem" % name).strpath)
 
     # Initialise one-level deep hierarchy.
-    gimmecert.commands.init(io.StringIO(), io.StringIO(), tmpdir.strpath, tmpdir.basename, 1)
+    gimmecert.commands.init(io.StringIO(), io.StringIO(), tmpdir.strpath, tmpdir.basename, 1, ("rsa", 2048))
 
     # Issue a bunch of certificates.
     for i in range(1, per_type_count + 1):
         entity_name = "server-with-privkey-%d" % i
-        gimmecert.commands.server(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None, None)
+        gimmecert.commands.server(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None, None, None)
 
         entity_name = "server-with-csr-%d" % i
         custom_csr_path = custom_csr_dir.join("server-with-csr-%d.csr.pem" % i).strpath
-        gimmecert.commands.server(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None, custom_csr_path)
+        gimmecert.commands.server(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None, custom_csr_path, None)
 
         entity_name = "client-with-privkey-%d" % i
-        gimmecert.commands.client(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None)
+        gimmecert.commands.client(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, None, None)
 
         entity_name = "client-with-csr-%d" % i
         custom_csr_path = custom_csr_dir.join("client-with-csr-%d.csr.pem" % i).strpath
-        gimmecert.commands.client(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, custom_csr_path)
+        gimmecert.commands.client(io.StringIO(), io.StringIO(), tmpdir.strpath, entity_name, custom_csr_path, None)
+
+    return tmpdir
+
+
+@pytest.fixture
+def gctmpdir(tmpdir):
+    """
+    Fixture that initialises Gimmecert project within tmpdir with a
+    simple CA hierarchy.
+
+    Initialised CA hierarchy is 1 level deep, with basename used being
+    identical to temporary directory base name, and it uses 2048-bit
+    RSA keys.
+
+    The fixture is useful in testing of commands where the CA
+    hierarchy does not matter (almost anything except init/status
+    commands).
+
+    :param tmpdir: Temporary directory (normally pytest tmpdir fixture) created for running the test.
+    :type tmpdir: py.path.local
+
+    :returs: Parent directory where Gimmecert has been initialised. Essentially the tmpdir fixture.
+    :rtype: py.path.local
+    """
+
+    # Initialise one-level deep hierarchy.
+    gimmecert.commands.init(io.StringIO(), io.StringIO(), tmpdir.strpath, tmpdir.basename, 1, ("rsa", 2048))
 
     return tmpdir

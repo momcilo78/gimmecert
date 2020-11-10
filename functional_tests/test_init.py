@@ -58,7 +58,7 @@ def test_initialisation_on_fresh_directory(tmpdir):
     # text to John that the directory has been initialised.
     assert exit_code == 0
     assert stderr == ""
-    assert "CA hierarchy initialised" in stdout
+    assert "CA hierarchy initialised using 2048-bit RSA keys." in stdout
 
     # The tool also points John to generated key and certificate material.
     assert ".gimmecert/ca/level1.key.pem" in stdout
@@ -149,7 +149,7 @@ def test_initialisation_with_custom_base_name(tmpdir):
     # his CA hierarchy has been initialised..
     assert exit_code == 0
     assert stderr == ""
-    assert "CA hierarchy initialised." in stdout
+    assert "CA hierarchy initialised using 2048-bit RSA keys." in stdout
 
     # Just before he starts using the CA certificates further, he
     # decides to double-check the results. He runs a couple of
@@ -193,7 +193,7 @@ def test_initialisation_with_custom_hierarchy_depth(tmpdir):
     # more CA artifacts listed now.
     assert exit_code == 0
     assert stderr == ""
-    assert "CA hierarchy initialised." in stdout
+    assert "CA hierarchy initialised using 2048-bit RSA keys." in stdout
     assert ".gimmecert/ca/level1.key.pem" in stdout
     assert ".gimmecert/ca/level1.cert.pem" in stdout
     assert ".gimmecert/ca/level2.key.pem" in stdout

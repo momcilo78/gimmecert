@@ -24,27 +24,27 @@ from setuptools import setup, find_packages
 
 README = open(os.path.join(os.path.dirname(__file__), 'README.rst')).read()
 
-python_requirements = ">=3.4,<3.8"
+python_requirements = ">=3.5,<3.10"
 
 install_requirements = [
-    'cryptography>=2.4,<2.5',
-    'python-dateutil>=2.7,<2.8',
+    'cryptography>=3.2,<3.3',
+    'python-dateutil>=2.8,<2.9',
 ]
 
 doc_requirements = [
-    'sphinx>=1.8,<1.9',
+    'sphinx>=3.3,<3.4',
 ]
 
 test_lint_requirements = [
-    'flake8>=3.6,<3.7',
+    'flake8>=3.8,<3.9',
 ]
 
 test_requirements = [
-    'freezegun>=0.3,<0.4',
-    'pytest>=4.0,<4.1',
-    'pytest-cov>=2.6,<2.7',
-    'tox>=3.5,<3.6',
-    'pexpect>=4.6,<4.7',
+    'freezegun>=1.0,<1.1',
+    'pytest>=6.1,<6.2',
+    'pytest-cov>=2.10,<2.11',
+    'tox>=3.20,<3.21',
+    'pexpect>=4.8,<4.9',
 ]
 
 release_requirements = [
@@ -52,7 +52,7 @@ release_requirements = [
 ]
 
 setup_requirements = [
-    'pytest-runner>=4.2,<4.3',
+    'pytest-runner>=5.2,<5.3',
 ]
 
 development_requirements = doc_requirements + test_requirements + test_lint_requirements + release_requirements
@@ -87,16 +87,17 @@ setup(
         'console_scripts': ['gimmecert=gimmecert.cli:main'],
     },
     classifiers=[
-        'Development Status :: 1 - Planning',
+        'Development Status :: 4 - Beta',
         'Environment :: Console',
         'Intended Audience :: Developers',
         'Intended Audience :: System Administrators',
         'License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)',
         'Operating System :: OS Independent',
-        'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
         'Topic :: Internet :: WWW/HTTP',
         'Topic :: Internet :: WWW/HTTP :: Site Management',
         'Topic :: Security',

@@ -6,6 +6,61 @@ NEXT RELEASE
 ------------
 
 
+0.5.0
+-----
+
+This release adds support for Python 3.9, and updates the package
+requirements.
+
+Resolved issues:
+
+- **Tasks**:
+
+  - `GC-39: Support for Python 3.9 <https://projects.majic.rs/gimmecert/issues/GC-39>`_
+  - `GC-40: Update all requirements <https://projects.majic.rs/gimmecert/issues/GC-40>`_
+
+
+0.4.0
+-----
+
+This release adds support for picking the key algorithm and parameters
+used for generating the private keys, and support for using ECDSA
+keys.
+
+Resolved issues:
+
+- **User stories**:
+
+  - `GC-36: As a system integrator, I want to be able to generate and use ECDSA keys <https://projects.majic.rs/gimmecert/issues/GC-36>`_
+
+- **Feature requests**:
+
+  - `GC-37: Ability to provide private key specification for key generation <https://projects.majic.rs/gimmecert/issues/GC-37>`_
+
+
+0.3.0
+-----
+
+This release adds support for Python 3.8, drops support for Python
+3.4, and updates the package requirements.
+
+.. warning::
+
+   This release contains the following breaking changes:
+
+   - Support for Python 3.4 has been dropped. Make sure that you are
+     using one of the supported Python versions prior to upgrading
+     *Gimmecert*.
+
+Resolved issues:
+
+- **Tasks**:
+
+  - `GC-32: Support for Python 3.8 <https://projects.majic.rs/gimmecert/issues/GC-32>`_
+  - `GC-33: Update all requirements <https://projects.majic.rs/gimmecert/issues/GC-33>`_
+  - `GC-35: Drop support for Python 3.4 <https://projects.majic.rs/gimmecert/issues/GC-35>`_
+
+
 0.2.0
 -----
 

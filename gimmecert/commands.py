@@ -33,6 +33,7 @@ class ExitCode:
     """
 
     SUCCESS = 0
+    ERROR_ARGUMENTS = 2
     ERROR_ALREADY_INITIALISED = 10
     ERROR_NOT_INITIALISED = 11
     ERROR_CERTIFICATE_ALREADY_ISSUED = 12
@@ -46,7 +47,7 @@ class InvalidCommandInvocation(Exception):
     pass
 
 
-def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth):
+def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth, key_specification):
     """
     Initialises the necessary directory and CA hierarchies for use in
     the specified directory.
@@ -66,6 +67,9 @@ def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth):
     :param ca_hierarchy_depth: Length/depths of CA hierarchy that should be initialised. E.g. total number of CAs in chain.
     :type ca_hierarchy_depth: int
 
+    :param key_specification: Key specification to use when generating private keys for the hierarchy.
+    :type key_specification: tuple(str, int)
+
     :returns: Status code, one from gimmecert.commands.ExitCode.
     :rtype: int
     """
@@ -82,7 +86,8 @@ def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth):
     gimmecert.storage.initialise_storage(project_directory)
 
     # Generate the CA hierarchy.
-    ca_hierarchy = gimmecert.crypto.generate_ca_hierarchy(ca_base_name, ca_hierarchy_depth)
+    key_generator = gimmecert.crypto.KeyGenerator(key_specification[0], key_specification[1])
+    ca_hierarchy = gimmecert.crypto.generate_ca_hierarchy(ca_base_name, ca_hierarchy_depth, key_generator)
 
     # Output the CA private keys and certificates.
     for level, (private_key, certificate) in enumerate(ca_hierarchy, 1):
@@ -96,7 +101,7 @@ def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth):
     full_chain_path = os.path.join(ca_directory, 'chain-full.cert.pem')
     gimmecert.storage.write_certificate_chain(full_chain, full_chain_path)
 
-    print("CA hierarchy initialised. Generated artefacts:", file=stdout)
+    print("CA hierarchy initialised using %s keys. Generated artefacts:" % str(key_generator), file=stdout)
     for level in range(1, ca_hierarchy_depth+1):
         print("    CA Level %d private key: .gimmecert/ca/level%d.key.pem" % (level, level), file=stdout)
         print("    CA Level %d certificate: .gimmecert/ca/level%d.cert.pem" % (level, level), file=stdout)
@@ -106,7 +111,7 @@ def init(stdout, stderr, project_directory, ca_base_name, ca_hierarchy_depth):
     return ExitCode.SUCCESS
 
 
-def server(stdout, stderr, project_directory, entity_name, extra_dns_names, custom_csr_path):
+def server(stdout, stderr, project_directory, entity_name, extra_dns_names, custom_csr_path, key_specification):
     """
     Issues a server certificate using the CA hierarchy initialised
     within the specified directory.
@@ -133,8 +138,13 @@ def server(stdout, stderr, project_directory, entity_name, extra_dns_names, cust
     :param extra_dns_names: List of additional DNS names to include in the subject alternative name.
     :type extra_dns_names: list[str]
 
-    :param custom_csr_path: Path to custom certificate signing request to use for issuing client certificate. Set to None or "" to generate private key.
+    :param custom_csr_path: Path to custom certificate signing request to use for issuing server certificate. Set to None or "" to generate private key.
+                            Always overrides passed-in key specification.
     :type custom_csr_path: str or None
+
+    :param key_specification: Key specification to use when generating private keys for the server. Ignored if custom_csr_path is specified. Set to None to
+                              default to issuing CA hiearchy algorithm and parameters.
+    :type key_specification: tuple(str, int) or None
 
     :returns: Status code, one from gimmecert.commands.ExitCode.
     :rtype: int
@@ -155,6 +165,10 @@ def server(stdout, stderr, project_directory, entity_name, extra_dns_names, cust
         print("Refusing to overwrite existing data. Certificate has already been issued for server %s." % entity_name, file=stderr)
         return ExitCode.ERROR_CERTIFICATE_ALREADY_ISSUED
 
+    # Grab the issuing CA private key and certificate.
+    ca_hierarchy = gimmecert.storage.read_ca_hierarchy(os.path.join(project_directory, '.gimmecert', 'ca'))
+    issuer_private_key, issuer_certificate = ca_hierarchy[-1]
+
     # Grab the private key or CSR, and extract public key.
     if custom_csr_path == "-":
         csr_pem = gimmecert.utils.read_input(sys.stdin, stderr, "Please enter the CSR")
@@ -166,13 +180,12 @@ def server(stdout, stderr, project_directory, entity_name, extra_dns_names, cust
         public_key = csr.public_key()
         private_key = None
     else:
-        private_key = gimmecert.crypto.generate_private_key()
+        if not key_specification:
+            key_specification = gimmecert.crypto.key_specification_from_public_key(issuer_private_key.public_key())
+        key_generator = gimmecert.crypto.KeyGenerator(key_specification[0], key_specification[1])
+        private_key = key_generator()
         public_key = private_key.public_key()
         csr = None
-
-    # Grab the issuing CA private key and certificate.
-    ca_hierarchy = gimmecert.storage.read_ca_hierarchy(os.path.join(project_directory, '.gimmecert', 'ca'))
-    issuer_private_key, issuer_certificate = ca_hierarchy[-1]
 
     # Issue the certificate.
     certificate = gimmecert.crypto.issue_server_certificate(entity_name, public_key, issuer_private_key, issuer_certificate, extra_dns_names)
@@ -242,7 +255,7 @@ def usage(stdout, stderr, parser):
     return ExitCode.SUCCESS
 
 
-def client(stdout, stderr, project_directory, entity_name, custom_csr_path):
+def client(stdout, stderr, project_directory, entity_name, custom_csr_path, key_specification):
     """
     Issues a client certificate using the CA hierarchy initialised
     within the specified directory.
@@ -267,7 +280,12 @@ def client(stdout, stderr, project_directory, entity_name, custom_csr_path):
     :type entity_name: str
 
     :param custom_csr_path: Path to custom certificate signing request to use for issuing client certificate. Set to None or "" to generate private key.
+                            Always overrides passed-in key specification.
     :type custom_csr_path: str or None
+
+    :param key_specification: Key specification to use when generating private keys for the client. Ignored if custom_csr_path is specified. Set to None to
+                              default to issuing CA hiearchy algorithm and parameters.
+    :type key_specification: tuple(str, int) or None
 
     :returns: Status code, one from gimmecert.commands.ExitCode.
     :rtype: int
@@ -301,7 +319,10 @@ def client(stdout, stderr, project_directory, entity_name, custom_csr_path):
         csr = gimmecert.storage.read_csr(custom_csr_path)
         public_key = csr.public_key()
     else:
-        private_key = gimmecert.crypto.generate_private_key()
+        if not key_specification:
+            key_specification = gimmecert.crypto.key_specification_from_public_key(issuer_private_key.public_key())
+        key_generator = gimmecert.crypto.KeyGenerator(key_specification[0], key_specification[1])
+        private_key = key_generator()
         public_key = private_key.public_key()
 
     # Issue certificate using the passed-in information and
@@ -329,7 +350,7 @@ def client(stdout, stderr, project_directory, entity_name, custom_csr_path):
     return ExitCode.SUCCESS
 
 
-def renew(stdout, stderr, project_directory, entity_type, entity_name, generate_new_private_key, custom_csr_path, dns_names):
+def renew(stdout, stderr, project_directory, entity_type, entity_name, generate_new_private_key, custom_csr_path, dns_names, key_specification):
     """
     Renews existing certificate, while optionally generating a new
     private key in the process. Naming and extensions are preserved.
@@ -358,6 +379,10 @@ def renew(stdout, stderr, project_directory, entity_type, entity_name, generate_
     :param dns_names: List of additional DNS names to use as replacement when renewing a server certificate. To remove additional DNS names,
         set the value to empty list. To keep the existing DNS names, set the value to None. Valid only for server certificates.
     :type dns_names: list[str] or None
+
+    :param key_specification: Key specification to use when generating new private key. Ignored if custom_csr_path is specified. Set to None to
+                              default to same algorithm and parameters currently used for the entity.
+    :type key_specification: tuple(str, int) or None
 
     :returns: Status code, one from gimmecert.commands.ExitCode.
     :rtype: int
@@ -398,7 +423,13 @@ def renew(stdout, stderr, project_directory, entity_type, entity_name, generate_
     # certificate. Otherwise just reuse existing public key in
     # certificate.
     if generate_new_private_key:
-        private_key = gimmecert.crypto.generate_private_key()
+
+        # Use key specification identical to the old key.
+        if not key_specification:
+            key_specification = gimmecert.crypto.key_specification_from_public_key(old_certificate.public_key())
+
+        key_generator = gimmecert.crypto.KeyGenerator(key_specification[0], key_specification[1])
+        private_key = key_generator()
         gimmecert.storage.write_private_key(private_key, private_key_path)
         public_key = private_key.public_key()
     elif custom_csr_path == '-':
@@ -510,6 +541,12 @@ def status(stdout, stderr, project_directory):
 
     ca_hierarchy = gimmecert.storage.read_ca_hierarchy(os.path.join(project_directory, '.gimmecert', 'ca'))
 
+    # Derive key specification from the issuing CA certificate.
+    key_specification = gimmecert.crypto.key_specification_from_public_key(ca_hierarchy[-1][1].public_key())
+    key_algorithm = gimmecert.crypto.KeyGenerator(key_specification[0], key_specification[1])
+    print("", file=stdout)  # Separator
+    print("Default key algorithm: %s" % key_algorithm, file=stdout)
+
     for i, (_, certificate) in enumerate(ca_hierarchy, 1):
         # Separator.
         print("", file=stdout)
@@ -548,6 +585,7 @@ def status(stdout, stderr, project_directory):
             certificate = gimmecert.storage.read_certificate(os.path.join(project_directory, '.gimmecert', 'server', certificate_file))
             private_key_path = os.path.join(project_directory, '.gimmecert', 'server', certificate_file.replace('.cert.pem', '.key.pem'))
             csr_path = os.path.join(project_directory, '.gimmecert', 'server', certificate_file.replace('.cert.pem', '.csr.pem'))
+            key_algorithm = str(gimmecert.crypto.KeyGenerator(*gimmecert.crypto.key_specification_from_public_key(certificate.public_key())))
 
             # Separator.
             print("", file=stdout)
@@ -565,6 +603,7 @@ def status(stdout, stderr, project_directory):
                                           validity_status), file=stdout)
             print("    DNS: %s" % ", ".join(gimmecert.utils.get_dns_names(certificate)), file=stdout)
 
+            print("    Key algorithm: %s" % key_algorithm, file=stdout)
             if os.path.exists(private_key_path):
                 print("    Private key: .gimmecert/server/%s" % certificate_file.replace('.cert.pem', '.key.pem'), file=stdout)
             elif os.path.exists(csr_path):
@@ -588,6 +627,7 @@ def status(stdout, stderr, project_directory):
             certificate = gimmecert.storage.read_certificate(os.path.join(project_directory, '.gimmecert', 'client', certificate_file))
             private_key_path = os.path.join(project_directory, '.gimmecert', 'client', certificate_file.replace('.cert.pem', '.key.pem'))
             csr_path = os.path.join(project_directory, '.gimmecert', 'client', certificate_file.replace('.cert.pem', '.csr.pem'))
+            key_algorithm = str(gimmecert.crypto.KeyGenerator(*gimmecert.crypto.key_specification_from_public_key(certificate.public_key())))
 
             # Separator.
             print("", file=stdout)
@@ -604,6 +644,7 @@ def status(stdout, stderr, project_directory):
                                                                             certificate.not_valid_after),
                                           validity_status), file=stdout)
 
+            print("    Key algorithm: %s" % key_algorithm, file=stdout)
             if os.path.exists(private_key_path):
                 print("    Private key: .gimmecert/client/%s" % certificate_file.replace('.cert.pem', '.key.pem'), file=stdout)
             elif os.path.exists(csr_path):

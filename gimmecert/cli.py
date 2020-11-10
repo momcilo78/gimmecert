@@ -23,10 +23,13 @@ import argparse
 import os
 import sys
 
+from cryptography.hazmat.primitives.asymmetric import ec
+
 from .decorators import subcommand_parser, get_subcommand_parser_setup_functions
 from .commands import client, help_, init, renew, server, status, usage, ExitCode
 
 
+ERROR_ARGUMENTS = 2
 ERROR_GENERIC = 10
 
 
@@ -42,6 +45,9 @@ Examples:
     # Initialise the local CA hierarchy and all the necessary directories.
     gimmecert init
 
+    # Initialise the local CA hierarchy while generating secp256r1 ECDSA keys.
+    gimmecert init --key-specification ecdsa:secp256r1
+
     # Issue a TLS server certificate with only the server name in DNS subject alternative name.
     gimmecert server myserver
 
@@ -51,14 +57,23 @@ Examples:
     # Issue a TLS server certificate by using public key from the CSR (naming/extensions are ignored).
     gimmecert server myserver --csr /tmp/myserver.csr.pem
 
+    # Issue a TLS server certificate while generating 3072-bit RSA key.
+    gimmecert server myserver --key-specification rsa:3072
+
     # Issue a TLS client certificate.
     gimmecert client myclient
 
     # Issue a TLS client certificate by using public key from the CSR (naming/extensions are ignored).
     gimmecert client myclient --csr /tmp/myclient.csr.pem
 
+    # Issue a TLS client certificate while generating 1024-bit RSA key.
+    gimmecert client myclient --key-specification rsa:1024
+
     # Renew a TLS server certificate, preserving naming and private key.
     gimmecert renew server myserver
+
+    # Renew a TLS server certificate, generating a new private key using specified key algorithm/parameters.
+    gimmecert renew server myserver --new-private-key --key-specification ecdsa:secp224r1
 
     # Renew a TLS server certificate, replacing the extra DNS names, but keeping the private key.
     gimmecert server myserver wrongdns.local
@@ -71,9 +86,63 @@ Examples:
     # Renew a TLS client certificate, preserving naming and private key.
     gimmecert renew client myclient
 
+    # Renew a TLS client certificate, generating a new private key using specified key algorithm/parameters.
+    gimmecert renew client myclient --new-private-key --key-specification ecdsa:secp521r1
+
     # Show information about CA hierarchy and issued certificates.
     gimmecert status
 """
+
+
+class ArgumentHelp:
+    """
+    Convenience class for storing help strings for common arguments.
+    """
+
+    key_specification_format = '''Specification/parameters to use for private key generation. \
+                                  For RSA keys, use format rsa:BIT_LENGTH. For ECDSA keys, use format ecdsa:CURVE_NAME. \
+                                  Supported curves: secp192r1, secp224r1, secp256k1, secp256r1, secp384r1, secp521r1.'''
+
+
+def key_specification(specification):
+    """
+    Verifies and parses the passed-in key specification. This is a
+    small utility function for use with the Python argument parser.
+
+    :param specification: Key specification. Currently supported formats are: "rsa:KEY_SIZE" and "ecdsa:CURVE_NAME".
+    :type specification: str
+
+    :returns: Parsed key algorithm and parameter(s) for the algorithm. For RSA, parameter is the RSA key size.
+    :rtype: tuple(str, int or cryptography.hazmat.primitives.asymmetric.ec.EllipticCurve)
+
+    :raises ValueError: If passed-in specification is invalid.
+    """
+
+    available_curves = {
+        "secp192r1": ec.SECP192R1,
+        "secp224r1": ec.SECP224R1,
+        "secp256k1": ec.SECP256K1,
+        "secp256r1": ec.SECP256R1,
+        "secp384r1": ec.SECP384R1,
+        "secp521r1": ec.SECP521R1,
+    }
+
+    try:
+        algorithm, parameters = specification.split(":", 2)
+        algorithm = algorithm.lower()
+
+        if algorithm == "rsa":
+            parameters = int(parameters)
+        elif algorithm == "ecdsa":
+            parameters = str(parameters).lower()
+            parameters = available_curves[parameters]
+        else:
+            raise ValueError()
+
+    except (ValueError, KeyError):
+        raise ValueError("Invalid key specification: '%s'" % specification)
+
+    return algorithm, parameters
 
 
 @subcommand_parser
@@ -81,13 +150,15 @@ def setup_init_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('init', description='Initialise CA hierarchy.')
     subparser.add_argument('--ca-base-name', '-b', help="Base name to use for CA naming. Default is to use the working directory base name.")
     subparser.add_argument('--ca-hierarchy-depth', '-d', type=int, help="Depth of CA hierarchy to generate. Default is 1", default=1)
+    subparser.add_argument('--key-specification', '-k', type=key_specification,
+                           help=ArgumentHelp.key_specification_format + " Default is rsa:2048.", default="rsa:2048")
 
     def init_wrapper(args):
         project_directory = os.getcwd()
         if args.ca_base_name is None:
             args.ca_base_name = os.path.basename(project_directory)
 
-        return init(sys.stdout, sys.stderr, project_directory, args.ca_base_name, args.ca_hierarchy_depth)
+        return init(sys.stdout, sys.stderr, project_directory, args.ca_base_name, args.ca_hierarchy_depth, args.key_specification)
 
     subparser.set_defaults(func=init_wrapper)
 
@@ -111,13 +182,18 @@ def setup_server_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('server', description='Issues server certificate.')
     subparser.add_argument('entity_name', help='Name of the server entity.')
     subparser.add_argument('dns_name', nargs='*', help='Additional DNS names to include in subject alternative name.')
-    subparser.add_argument('--csr', '-c', type=str, default=None, help='''Do not generate server private key locally, and use the passed-in \
+    key_specification_or_csr_group = subparser.add_mutually_exclusive_group()
+    key_specification_or_csr_group.add_argument('--csr', '-c', type=str, default=None,
+                                                help='''Do not generate server private key locally, and use the passed-in \
     certificate signing request (CSR) instead. Use dash (-) to read from standard input. Only the public key is taken from the CSR.''')
+    key_specification_or_csr_group.add_argument('--key-specification', '-k', type=key_specification, default=None,
+                                                help=ArgumentHelp.key_specification_format +
+                                                " Default is to use same algorithm/parameters as used by CA hierarchy.")
 
     def server_wrapper(args):
         project_directory = os.getcwd()
 
-        return server(sys.stdout, sys.stderr, project_directory, args.entity_name, args.dns_name, args.csr)
+        return server(sys.stdout, sys.stderr, project_directory, args.entity_name, args.dns_name, args.csr, args.key_specification)
 
     subparser.set_defaults(func=server_wrapper)
 
@@ -128,13 +204,18 @@ def setup_server_subcommand_parser(parser, subparsers):
 def setup_client_subcommand_parser(parser, subparsers):
     subparser = subparsers.add_parser('client', description='Issue client certificate.')
     subparser.add_argument('entity_name', help='Name of the client entity.')
-    subparser.add_argument('--csr', '-c', type=str, default=None, help='''Do not generate client private key locally, and use the passed-in \
+    key_specification_or_csr_group = subparser.add_mutually_exclusive_group()
+    key_specification_or_csr_group.add_argument('--csr', '-c', type=str, default=None,
+                                                help='''Do not generate client private key locally, and use the passed-in \
     certificate signing request (CSR) instead. Use dash (-) to read from standard input. Only the public key is taken from the CSR.''')
+    key_specification_or_csr_group.add_argument('--key-specification', '-k', type=key_specification, default=None,
+                                                help=ArgumentHelp.key_specification_format +
+                                                " Default is to use same algorithm/parameters as used by CA hierarchy.")
 
     def client_wrapper(args):
         project_directory = os.getcwd()
 
-        return client(sys.stdout, sys.stderr, project_directory, args.entity_name, args.csr)
+        return client(sys.stdout, sys.stderr, project_directory, args.entity_name, args.csr, args.key_specification)
 
     subparser.set_defaults(func=client_wrapper)
 
@@ -171,10 +252,20 @@ def setup_renew_subcommand_parser(parser, subparsers):
     existing certificate, and use the passed-in certificate signing request (CSR) instead. Use dash (-) to read from standard input. \
     If private key exists, it will be removed. Mutually exclusive with the --new-private-key option. Only the public key is taken from the CSR.''')
 
+    subparser.add_argument('--key-specification', '-k', type=key_specification,
+                           help=ArgumentHelp.key_specification_format + " Default is to use same specification as used for current certificate.", default=None)
+
     def renew_wrapper(args):
+        # This is a workaround for having the key specification option
+        # be dependant on new private key option, since argparse
+        # cannot provide such verification on its own.
+        if args.key_specification and not args.new_private_key:
+            subparser.error("argument --key-specification/-k: must be used with --new-private-key/-p")
+
         project_directory = os.getcwd()
 
-        return renew(sys.stdout, sys.stderr, project_directory, args.entity_type, args.entity_name, args.new_private_key, args.csr, args.dns_names)
+        return renew(sys.stdout, sys.stderr, project_directory, args.entity_type, args.entity_name, args.new_private_key, args.csr, args.dns_names,
+                     args.key_specification)
 
     subparser.set_defaults(func=renew_wrapper)
 
